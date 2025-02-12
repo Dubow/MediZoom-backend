@@ -20,8 +20,8 @@ router.post("/signup", async (req, res) => {
     const hashedPassword = await bcrypt.hash(password, 10);
     const verificationCode = crypto.randomInt(100000, 999999).toString();
 
-    let sql = "INSERT INTO users (name, email, password, role, specialization, verification_code, verified) VALUES (?, ?, ?, ?, ?, ?, ?)";
-    await db.promise().query(sql, [name, email, hashedPassword, role, specialization || null, verificationCode, false]);
+    let sql = "INSERT INTO users (name, email, password, role, specialization, verification_code, verified, profileCompleted) VALUES (?, ?, ?, ?, ?, ?, ?, ?)";
+    await db.promise().query(sql, [name, email, hashedPassword, role, specialization || null, verificationCode, false, false]);
 
     await sendEmail(email, "Verify Your Email", `Your verification code is: ${verificationCode}`);
 
@@ -70,7 +70,7 @@ router.post("/login", async (req, res) => {
 
     const token = jwt.sign({ id: user.id, role: user.role }, process.env.JWT_SECRET, { expiresIn: "1h" });
 
-    res.json({ token, user: { id: user.id, name: user.name, role: user.role } });
+    res.json({ token, user: { id: user.id, name: user.name, role: user.role, profileCompleted: user.profileCompleted  } });
 
   } catch (error) {
     res.status(500).json({ error: error.message });
@@ -123,5 +123,6 @@ router.post("/reset-password", async (req, res) => {
     res.status(500).json({ error: error.message });
   }
 });
+
 
 module.exports = router;
