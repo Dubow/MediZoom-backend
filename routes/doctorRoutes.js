@@ -90,6 +90,30 @@ router.get("/profile", authenticateToken, async (req, res) => {
   }
 });
 
+// Get All Doctors
+router.get("/profiles", async (req, res) => {
+  try {
+    const [doctors] = await db.promise().query("SELECT * FROM doctor_profile");
+    res.status(200).json(doctors);
+  } catch (error) {
+    res.status(500).json({ error: error.message });
+  }
+});
+
+// Get Specific Doctor Profile by ID
+router.get("/profile/:id", async (req, res) => {
+  const { id } = req.params;
+  try {
+    const [doctor] = await db.promise().query("SELECT * FROM doctor_profile WHERE user_id = ?", [id]);
+    if (doctor.length === 0) {
+      return res.status(404).json({ message: "Doctor not found" });
+    }
+    res.status(200).json(doctor[0]);
+  } catch (error) {
+    res.status(500).json({ error: error.message });
+  }
+});
+
 // Profile Photo Upload Route
 router.post("/upload-photo", authenticateToken, upload.single("profile_photo"), async (req, res) => {
   if (!req.file) {
