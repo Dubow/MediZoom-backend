@@ -76,7 +76,12 @@ router.get("/profile", authenticateToken, async (req, res) => {
 
   try {
     const [doctorProfile] = await db.promise().query(
-      "SELECT country, summary, rate, phone, availability, profile_photo FROM doctor_profile WHERE user_id = ?",
+      `
+      SELECT u.name, u.specialization, dp.country, dp.summary, dp.rate, dp.phone, dp.availability, dp.profile_photo
+      FROM users u
+      LEFT JOIN doctor_profile dp ON u.id = dp.user_id
+      WHERE u.id = ?
+      `,
       [userId]
     );
 
@@ -93,7 +98,14 @@ router.get("/profile", authenticateToken, async (req, res) => {
 // Get All Doctors
 router.get("/profiles", async (req, res) => {
   try {
-    const [doctors] = await db.promise().query("SELECT * FROM doctor_profile");
+    const [doctors] = await db.promise().query(`
+      SELECT 
+        u.name, u.specialization, dp.user_id, dp.country, dp.summary, dp.rate, dp.phone, dp.availability, dp.profile_photo
+      FROM 
+        doctor_profile dp
+      JOIN 
+        users u ON u.id = dp.user_id
+    `);
     res.status(200).json(doctors);
   } catch (error) {
     res.status(500).json({ error: error.message });
@@ -104,7 +116,14 @@ router.get("/profiles", async (req, res) => {
 router.get("/profile/:id", async (req, res) => {
   const { id } = req.params;
   try {
-    const [doctor] = await db.promise().query("SELECT * FROM doctor_profile WHERE user_id = ?", [id]);
+    const [doctor] = await db.promise().query(`SELECT 
+        u.name, u.specialization, dp.user_id, dp.country, dp.summary, dp.rate, dp.phone, dp.availability, dp.profile_photo
+      FROM 
+        doctor_profile dp
+      JOIN 
+        users u ON u.id = dp.user_id
+      WHERE dp.user_id = ?
+    `, [id]);
     if (doctor.length === 0) {
       return res.status(404).json({ message: "Doctor not found" });
     }
