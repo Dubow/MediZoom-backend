@@ -20,42 +20,65 @@ const upload = multer({ storage });
 
 // Profile Update Route for Doctor (Including Profile Photo)
 router.post("/profile", authenticateToken, upload.single("profile_photo"), async (req, res) => {
-  const { country, summary, rate, phone, availability } = req.body;
-  const userId = req.user.id; // Get user ID from JWT token
-  const profilePhoto = req.file ? `/uploads/${req.file.filename}` : null; // Handle photo upload if present
+  const { country, summary, rate, phone, availability, profile_photo } = req.body;
+  const userId = req.user.id;
+  let profilePhotoToStore = null; // Initialize to null
 
   try {
-    // Check if the doctor already has a profile
-    const [existingProfile] = await db.promise().query("SELECT * FROM doctor_profile WHERE user_id = ?", [userId]);
+      if (req.file) {
+          // New file uploaded, use relative path
+          profilePhotoToStore = `/uploads/${req.file.filename}`;
+      } else if (profile_photo) {
+          // Existing photo URL or relative path sent in request body
+          if (profile_photo.startsWith("http")) {
+              // Extract relative path from full URL
+              const baseUrl = "http://192.168.10.7:5000"; 
+              profilePhotoToStore = profile_photo.replace(baseUrl, "");
+          } else {
+              // Relative path already provided
+              profilePhotoToStore = profile_photo;
+          }
+      } else {
+          // No new file uploaded and no existing photo provided
+          // Check if there is an existing photo in the database
+          const [existingProfile] = await db.promise().query("SELECT profile_photo FROM doctor_profile WHERE user_id = ?", [userId]);
+          if (existingProfile.length > 0 && existingProfile[0].profile_photo) {
+              // Use the existing photo from the database
+              profilePhotoToStore = existingProfile[0].profile_photo;
+          }
+      }
 
-    if (existingProfile.length > 0) {
-      // Update existing profile
-      let sql = `
-        UPDATE doctor_profile
-        SET country = ?, summary = ?, rate = ?, phone = ?, availability = ?, profile_photo = ?
-        WHERE user_id = ?
-      `;
-      await db.promise().query(sql, [country, summary, rate, phone, JSON.stringify(availability), profilePhoto, userId]);
-    } else {
-      // Create a new profile if one doesn't exist
-      let sql = `
-        INSERT INTO doctor_profile (user_id, country, summary, rate, phone, availability, profile_photo)
-        VALUES (?, ?, ?, ?, ?, ?, ?)
-      `;
-      await db.promise().query(sql, [userId, country, summary, rate, phone, JSON.stringify(availability), profilePhoto]);
-    }
+      // Check if the doctor already has a profile
+      const [existingProfile] = await db.promise().query("SELECT * FROM doctor_profile WHERE user_id = ?", [userId]);
 
-    // Update profileCompleted status in users table
-    await db.promise().query("UPDATE users SET profileCompleted = true WHERE id = ?", [userId]);
+      if (existingProfile.length > 0) {
+          // Update existing profile
+          let sql = `
+              UPDATE doctor_profile
+              SET country = ?, summary = ?, rate = ?, phone = ?, availability = ?, profile_photo = ?
+              WHERE user_id = ?
+          `;
+          await db.promise().query(sql, [country, summary, rate, phone, JSON.stringify(availability), profilePhotoToStore, userId]);
+      } else {
+          // Create a new profile
+          let sql = `
+              INSERT INTO doctor_profile (user_id, country, summary, rate, phone, availability, profile_photo)
+              VALUES (?, ?, ?, ?, ?, ?, ?)
+          `;
+          await db.promise().query(sql, [userId, country, summary, rate, phone, JSON.stringify(availability), profilePhotoToStore]);
+      }
 
-    res.status(200).json({ message: "Profile updated successfully!" });
+      // Update profileCompleted status
+      await db.promise().query("UPDATE users SET profileCompleted = true WHERE id = ?", [userId]);
+
+      res.status(200).json({ message: "Profile updated successfully!" });
   } catch (error) {
-    res.status(500).json({ error: error.message });
+      res.status(500).json({ error: error.message });
   }
 });
 
 // Serve Static Images
-router.use("/uploads", express.static("uploads")); // Serve images from the 'uploads' folder
+router.use("/uploads", express.static(path.join(__dirname, "uploads"))); // Serve images from the 'uploads' folder
 
 // Update Profile Completion Status
 router.post("/update-profile-status", authenticateToken, async (req, res) => {
@@ -70,7 +93,7 @@ router.post("/update-profile-status", authenticateToken, async (req, res) => {
   }
 });
 
-// Get Doctor Profile
+// doctor Get Doctor Profile
 router.get("/profile", authenticateToken, async (req, res) => {
   const userId = req.user.id;
 
@@ -86,16 +109,23 @@ router.get("/profile", authenticateToken, async (req, res) => {
     );
 
     if (doctorProfile.length === 0) {
-      return res.status(404).json({ message: "Doctor profile not found" });
+      return res.status(404).json({ error: "Doctor profile not found" });
     }
 
-    res.json(doctorProfile[0]); // Return doctor profile data
+    // Ensure you're sending the full profile_photo URL
+    const profilePhotoUrl = doctorProfile[0].profile_photo ? `http://192.168.10.7:5000${doctorProfile[0].profile_photo}` : null;
+
+    res.json({
+      ...doctorProfile[0],
+      profile_photo: profilePhotoUrl, // Send the full photo URL
+    });
   } catch (error) {
+    console.error("Error fetching doctor profile:", error);
     res.status(500).json({ error: error.message });
   }
 });
 
-// Get All Doctors
+//  client Get All Doctors
 router.get("/profiles", async (req, res) => {
   try {
     const [doctors] = await db.promise().query(`
@@ -143,6 +173,9 @@ router.post("/upload-photo", authenticateToken, upload.single("profile_photo"), 
   const userId = req.user.id;
 
   try {
+    // Log the stored file path for debugging
+    console.log("Profile Photo Path:", profilePhoto);
+    
     await db.promise().query("UPDATE doctor_profile SET profile_photo = ? WHERE user_id = ?", [profilePhoto, userId]);
     res.status(200).json({ profilePhoto });
   } catch (error) {
@@ -150,4 +183,5 @@ router.post("/upload-photo", authenticateToken, upload.single("profile_photo"), 
   }
 });
 
-module.exports = router;
+
+module.exports = router; 
