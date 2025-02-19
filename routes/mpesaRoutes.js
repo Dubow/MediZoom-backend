@@ -42,6 +42,23 @@ router.post("/initiate-payment", async (req, res) => {
   }
 });
 
+// M-Pesa Payment Result Callback
+router.post("/result", (req, res) => {
+    const result = req.body;
+  
+    // Process the result here (e.g., store payment details in DB, update user)
+    if (result?.ResultCode === 0) {
+      // Successful payment
+      console.log("Payment success:", result);
+      res.json({ message: "Payment successful" });
+    } else {
+      // Failed payment
+      console.log("Payment failed:", result);
+      res.status(400).json({ message: "Payment failed" });
+    }
+  });
+  
+
 // Function to get the access token required by the M-Pesa API
 async function getAccessToken() {
   const url = 'https://sandbox.safaricom.co.ke/oauth/v1/generate?grant_type=client_credentials';
