@@ -4,73 +4,95 @@ const dotenv = require("dotenv");
 
 dotenv.config(); // Load environment variables
 
-const router = express.Router();
+const mpesaRouter = express.Router();
 
 // M-Pesa Payment Request Route
-router.post("/initiate-payment", async (req, res) => {
+mpesaRouter.post("/initiate-payment", async (req, res) => {
+  console.log("M-Pesa initiate-payment request body:", req.body);
+  console.log("Initiate payment route hit!");
   try {
-    const { amount, phoneNumber, accountReference, transactionDesc } = req.body;
+      const { amount, phoneNumber, accountReference, transactionDesc } = req.body;
 
-    // Prepare the M-Pesa request data
-    const headers = {
-      Authorization: `Bearer ${await getAccessToken()}`,
-      "Content-Type": "application/json",
-    };
+      if (!amount || !phoneNumber || !accountReference) {
+          return res.status(400).json({ error: "Missing required parameters (amount, phoneNumber, accountReference)." });
+      }
 
-    const paymentData = {
-      BusinessShortCode: process.env.MPESA_SHORTCODE,
-      LipaNaMpesaOnlineShortcode: process.env.MPESA_SHORTCODE,
-      LipaNaMpesaOnlineShortcodeSecret: process.env.MPESA_LIPA_SECRET,
-      Amount: amount,
-      PhoneNumber: phoneNumber,
-      AccountReference: accountReference,
-      TransactionDesc: transactionDesc,
-      // other required details
-    };
+      const headers = {
+          Authorization: `Bearer ${await getAccessToken()}`,
+          "Content-Type": "application/json",
+      };
 
-    const response = await axios.post(process.env.MPESA_LIPA_URL, paymentData, { headers });
-    
-    if (response.data) {
-      return res.json({ message: "Payment initiated successfully", paymentDetails: response.data });
-    } else {
-      return res.status(400).json({ error: "Payment initiation failed" });
-    }
+      const paymentData = {
+          BusinessShortCode: process.env.MPESA_SHORTCODE,
+          LipaNaMpesaOnlineShortcode: process.env.MPESA_SHORTCODE,
+          Timestamp: new Date().toISOString().replace(/[^0-9]/g, '').slice(0, 14),
+          TransactionType: "CustomerPayBillOnline",
+          Amount: amount,
+          PartyA: phoneNumber,
+          PartyB: process.env.MPESA_SHORTCODE,
+          PhoneNumber: phoneNumber,
+          CallBackURL: process.env.MPESA_LIPA_RESULT_URL,
+          AccountReference: accountReference,
+          TransactionDesc: transactionDesc || "Payment for appointment",
+      };
+      console.log("M-Pesa Payment Data:", paymentData);
 
+      // Generate the password
+      const password = Buffer.from(
+          process.env.MPESA_SHORTCODE + process.env.MPESA_LIPA_PASSKEY + paymentData.Timestamp
+      ).toString("base64");
+
+      paymentData.Password = password; // Add the password to the payment data
+
+      const response = await axios.post(process.env.MPESA_LIPA_URL, paymentData, { headers });
+
+      if (response.data) {
+          console.log("M-Pesa response:", response.data);
+          return res.json({ message: "Payment initiated successfully", paymentDetails: response.data });
+      } else {
+          console.error("M-Pesa initiation failed. No response data.");
+          return res.status(400).json({ error: "Payment initiation failed: No response from M-Pesa API." });
+      }
   } catch (error) {
-    console.error("Error initiating payment:", error.message);
-    res.status(500).json({ error: "Server error" });
+      console.error("Error initiating payment:", error);
+      return res.status(500).json({ error: `Server error: ${error.message}` });
   }
 });
 
 // M-Pesa Payment Result Callback
-router.post("/result", (req, res) => {
+mpesaRouter.post("/result", (req, res) => {
     const result = req.body;
-  
+    console.log("M-Pesa callback result:", result);
+
     // Process the result here (e.g., store payment details in DB, update user)
-    if (result?.ResultCode === 0) {
-      // Successful payment
-      console.log("Payment success:", result);
-      res.json({ message: "Payment successful" });
+    if (result?.Body?.stkCallback?.ResultCode === 0) {
+        // Successful payment
+        console.log("Payment success:", result);
+        res.json({ message: "Payment successful", result: result.Body.stkCallback });
     } else {
-      // Failed payment
-      console.log("Payment failed:", result);
-      res.status(400).json({ message: "Payment failed" });
+        // Failed payment
+        console.error("Payment failed:", result);
+        res.status(400).json({ message: "Payment failed", result: result?.Body?.stkCallback });
     }
-  });
-  
+});
 
 // Function to get the access token required by the M-Pesa API
 async function getAccessToken() {
-  const url = 'https://sandbox.safaricom.co.ke/oauth/v1/generate?grant_type=client_credentials';
-  const auth = Buffer.from(`${process.env.MPESA_LIPA_KEY}:${process.env.MPESA_LIPA_SECRET}`).toString('base64');
+    const url = process.env.MPESA_OAUTH_URL; // Use environment variable
+    const auth = Buffer.from(`${process.env.MPESA_LIPA_KEY}:${process.env.MPESA_LIPA_SECRET}`).toString('base64'); // Correct variable names
 
-  const response = await axios.get(url, {
-    headers: {
-      Authorization: `Basic ${auth}`,
+    try {
+        const response = await axios.get(url, {
+            headers: {
+                Authorization: `Basic ${auth}`,
+            }
+        });
+
+        return response.data.access_token;
+    } catch (error) {
+        console.error("Error getting access token:", error);
+        throw error; // Re-throw the error to be handled in the main route
     }
-  });
-
-  return response.data.access_token;
 }
 
-module.exports = router;
+module.exports = mpesaRouter;
