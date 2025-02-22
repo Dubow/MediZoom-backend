@@ -1,6 +1,7 @@
 const express = require("express");
 const axios = require("axios");
 const dotenv = require("dotenv");
+const db = require("../config/db");
 
 dotenv.config(); // Load environment variables
 
@@ -8,55 +9,73 @@ const mpesaRouter = express.Router();
 
 // M-Pesa Payment Request Route
 mpesaRouter.post("/initiate-payment", async (req, res) => {
-  console.log("M-Pesa initiate-payment request body:", req.body);
-  console.log("Initiate payment route hit!");
-  try {
-      const { amount, phoneNumber, accountReference, transactionDesc } = req.body;
+    console.log("M-Pesa initiate-payment request body:", req.body);
+    console.log("Initiate payment route hit!");
 
-      if (!amount || !phoneNumber || !accountReference) {
-          return res.status(400).json({ error: "Missing required parameters (amount, phoneNumber, accountReference)." });
-      }
+    try {
+        const { amount, doctorId, accountReference, transactionDesc, clientPhoneNumber } = req.body;
 
-      const headers = {
-          Authorization: `Bearer ${await getAccessToken()}`,
-          "Content-Type": "application/json",
-      };
+        if (!amount || !doctorId || !accountReference || !clientPhoneNumber) {
+            return res.status(400).json({ error: "Missing required parameters (amount, doctorId, accountReference, clientPhoneNumber)." });
+        }
 
-      const paymentData = {
-          BusinessShortCode: process.env.MPESA_SHORTCODE,
-          LipaNaMpesaOnlineShortcode: process.env.MPESA_SHORTCODE,
-          Timestamp: new Date().toISOString().replace(/[^0-9]/g, '').slice(0, 14),
-          TransactionType: "CustomerPayBillOnline",
-          Amount: amount,
-          PartyA: phoneNumber,
-          PartyB: process.env.MPESA_SHORTCODE,
-          PhoneNumber: phoneNumber,
-          CallBackURL: process.env.MPESA_LIPA_RESULT_URL,
-          AccountReference: accountReference,
-          TransactionDesc: transactionDesc || "Payment for appointment",
-      };
-      console.log("M-Pesa Payment Data:", paymentData);
+        // Fetch the doctor's phone number from the database
+        const [doctorData] = await db.promise().query(
+            "SELECT phone FROM doctor_profile WHERE user_id = ?",
+            [doctorId]
+        );
 
-      // Generate the password
-      const password = Buffer.from(
-          process.env.MPESA_SHORTCODE + process.env.MPESA_LIPA_PASSKEY + paymentData.Timestamp
-      ).toString("base64");
+        if (!doctorData || doctorData.length === 0) {
+            return res.status(404).json({ error: "Doctor profile not found." });
+        }
 
-      paymentData.Password = password; // Add the password to the payment data
+        const doctorMpesaPersonalNumber = doctorData[0].phone; // Doctor's personal M-Pesa number
 
-      const response = await axios.post(process.env.MPESA_LIPA_URL, paymentData, { headers });
+        if (!doctorMpesaPersonalNumber) {
+            return res.status(400).json({ error: "Doctor's personal M-Pesa number not found." });
+        }
 
-      if (response.data) {
-          console.log("M-Pesa response:", response.data);
-          return res.json({ message: "Payment initiated successfully", paymentDetails: response.data });
-      } else {
-          console.error("M-Pesa initiation failed. No response data.");
-          return res.status(400).json({ error: "Payment initiation failed: No response from M-Pesa API." });
-      }
-  } catch (error) {
-      console.error("Error initiating payment:", error);
-      return res.status(500).json({ error: `Server error: ${error.message}` });
-  }
+        const headers = {
+            Authorization: `Bearer ${await getAccessToken()}`,
+            "Content-Type": "application/json",
+        };
+
+        const paymentData = {
+            BusinessShortCode: process.env.MPESA_SHORTCODE, // Your business shortcode
+            LipaNaMpesaOnlineShortcode: process.env.MPESA_SHORTCODE, // Your business shortcode
+            Timestamp: new Date().toISOString().replace(/[^0-9]/g, '').slice(0, 14),
+            TransactionType: "CustomerPayBillOnline",
+            Amount: amount,
+            PartyA: `254${clientPhoneNumber.substring(1)}`, // Client's phone number
+            PartyB: doctorMpesaPersonalNumber, // Doctor's personal M-Pesa number
+            PhoneNumber: `254${clientPhoneNumber.substring(1)}`, // Client's phone number
+            CallBackURL: process.env.MPESA_LIPA_RESULT_URL,
+            AccountReference: accountReference,
+            TransactionDesc: transactionDesc || "Payment for appointment",
+        };
+
+        console.log("M-Pesa Payment Data:", paymentData);
+
+        // Generate the password
+        const password = Buffer.from(
+            process.env.MPESA_SHORTCODE + process.env.MPESA_LIPA_PASSKEY + paymentData.Timestamp
+        ).toString("base64");
+
+        paymentData.Password = password; // Add the password to the payment data
+
+        const response = await axios.post(process.env.MPESA_LIPA_URL, paymentData, { headers });
+
+        if (response.data) {
+            console.log("M-Pesa response:", response.data);
+            return res.json({ message: "Payment initiated successfully", paymentDetails: response.data });
+        } else {
+            console.error("M-Pesa initiation failed. No response data.");
+            return res.status(400).json({ error: "Payment initiation failed: No response from M-Pesa API." });
+        }
+    } catch (error) {
+        console.error("Error initiating payment:", error);
+        return res.status(500).json({ error: `Server error: ${error.message}` });
+    }
 });
 
 // M-Pesa Payment Result Callback

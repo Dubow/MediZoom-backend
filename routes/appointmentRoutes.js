@@ -11,41 +11,61 @@ router.post("/book", authenticateToken, async (req, res) => {
   const clientId = req.user.id; // Get client ID from JWT token
 
   try {
-      // ... (existing appointment availability check) ...
+    // Check if the doctor is available at the given date
+    const [existingAppointment] = await db.promise().query(
+      "SELECT * FROM appointments WHERE doctor_id = ? AND appointment_date = ?",
+      [doctorId, appointmentDate]
+    );
 
-      // Insert appointment as pending
-      const [insertedAppointment] = await db.promise().query(
-          "INSERT INTO appointments (client_id, doctor_id, appointment_date, status) VALUES (?, ?, ?, ?)",
-          [clientId, doctorId, appointmentDate, "Pending"]
+    if (existingAppointment.length > 0) {
+      return res.status(400).json({ message: "Doctor is already booked at this time." });
+    }
+
+    // Insert appointment as pending
+    const [insertedAppointment] = await db.promise().query(
+      "INSERT INTO appointments (client_id, doctor_id, appointment_date, status) VALUES (?, ?, ?, ?)",
+      [clientId, doctorId, appointmentDate, "Pending"]
+    );
+
+    // Fetch doctor's phone number from the database
+    const [doctorData] = await db.promise().query(
+      "SELECT phone FROM doctor_profile WHERE user_id = ?",
+      [doctorId]
+    );
+
+    if (!doctorData || doctorData.length === 0) {
+      return res.status(404).json({ error: "Doctor phone number not found." });
+    }
+
+    const doctorPhone = doctorData[0].phone; // Get the doctor's phone number
+
+    // Prepare M-Pesa payment data
+    const paymentResponse = await axios.post(process.env.MPESA_PAYMENT_URL, {
+      phoneNumber: doctorPhone, // Use the doctor's phone number here
+      amount: amount,
+      accountReference: insertedAppointment.insertId.toString(), // Use the appointment ID
+      transactionDesc: `Appointment payment for appointment ID: ${insertedAppointment.insertId}`
+    });
+
+    // Check payment status in response
+    if (paymentResponse.data?.paymentDetails?.ResponseCode === "0") {
+      // Update the appointment as Payment Pending
+      await db.promise().query(
+        "UPDATE appointments SET status = 'Payment Pending' WHERE id = ?",
+        [insertedAppointment.insertId]
       );
-
-      // Prepare M-Pesa payment data
-      const paymentResponse = await axios.post(process.env.MPESA_PAYMENT_URL, {
-          phoneNumber,
-          amount: amount,
-          accountReference: insertedAppointment.insertId.toString(), // Convert to string
-          transactionDesc: `Appointment payment for appointment ID: ${insertedAppointment.insertId}`
+      return res.status(200).json({
+        message: "Appointment booked successfully. Please complete your payment.",
+        paymentStatus: "Pending",
+        paymentDetails: paymentResponse.data.paymentDetails,
       });
-
-      // Check payment status in response
-      if (paymentResponse.data?.paymentDetails?.ResponseCode === "0") {
-          // Update the appointment as Payment Pending
-          await db.promise().query(
-              "UPDATE appointments SET status = 'Payment Pending' WHERE id = ?",
-              [insertedAppointment.insertId]
-          );
-          return res.status(200).json({
-              message: "Appointment booked successfully. Please complete your payment.",
-              paymentStatus: "Pending",
-              paymentDetails: paymentResponse.data.paymentDetails,
-          });
-      } else {
-          console.error("Payment initiation failed:", paymentResponse.data);
-          return res.status(500).json({ message: "Payment initiation failed.", paymentResponse: paymentResponse.data });
-      }
+    } else {
+      console.error("Payment initiation failed:", paymentResponse.data);
+      return res.status(500).json({ message: "Payment initiation failed.", paymentResponse: paymentResponse.data });
+    }
   } catch (error) {
-      console.error("Error booking appointment:", error);
-      res.status(500).json({ error: "An error occurred while booking the appointment." });
+    console.error("Error booking appointment:", error);
+    res.status(500).json({ error: "An error occurred while booking the appointment." });
   }
 });
 
