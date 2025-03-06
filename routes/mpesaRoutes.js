@@ -19,20 +19,14 @@ mpesaRouter.post("/initiate-payment", async (req, res) => {
             return res.status(400).json({ error: "Missing required parameters (amount, doctorId, accountReference, clientPhoneNumber)." });
         }
 
-        // Fetch the doctor's phone number from the database
+        // Fetch the doctor's details from the database (you might need doctorId for other purposes)
         const [doctorData] = await db.promise().query(
-            "SELECT phone FROM doctor_profile WHERE user_id = ?",
+            "SELECT id FROM doctor_profile WHERE user_id = ?",
             [doctorId]
         );
 
         if (!doctorData || doctorData.length === 0) {
             return res.status(404).json({ error: "Doctor profile not found." });
-        }
-
-        const doctorMpesaPersonalNumber = doctorData[0].phone; // Doctor's personal M-Pesa number
-
-        if (!doctorMpesaPersonalNumber) {
-            return res.status(400).json({ error: "Doctor's personal M-Pesa number not found." });
         }
 
         const headers = {
@@ -41,13 +35,13 @@ mpesaRouter.post("/initiate-payment", async (req, res) => {
         };
 
         const paymentData = {
-            BusinessShortCode: process.env.MPESA_SHORTCODE, // Your business shortcode
-            LipaNaMpesaOnlineShortcode: process.env.MPESA_SHORTCODE, // Your business shortcode
+            BusinessShortCode: process.env.MPESA_SHORTCODE, // Your paybill number
+            LipaNaMpesaOnlineShortcode: process.env.MPESA_SHORTCODE, // Your paybill number
             Timestamp: new Date().toISOString().replace(/[^0-9]/g, '').slice(0, 14),
             TransactionType: "CustomerPayBillOnline",
             Amount: amount,
             PartyA: `254${clientPhoneNumber.substring(1)}`, // Client's phone number
-            PartyB: doctorMpesaPersonalNumber, // Doctor's personal M-Pesa number
+            PartyB: process.env.MPESA_SHORTCODE, // Your paybill number
             PhoneNumber: `254${clientPhoneNumber.substring(1)}`, // Client's phone number
             CallBackURL: process.env.MPESA_LIPA_RESULT_URL,
             AccountReference: accountReference,
@@ -93,6 +87,79 @@ mpesaRouter.post("/result", (req, res) => {
         console.error("Payment failed:", result);
         res.status(400).json({ message: "Payment failed", result: result?.Body?.stkCallback });
     }
+});
+
+// M-Pesa B2C Withdrawal Route
+mpesaRouter.post("/withdraw", async (req, res) => {
+    try {
+        const { doctorId, amount } = req.body;
+
+        // Fetch doctor's M-Pesa number from the database
+        const [doctorData] = await db.promise().query(
+            "SELECT phone FROM doctor_profile WHERE user_id = ?",
+            [doctorId]
+        );
+
+        if (!doctorData || doctorData.length === 0) {
+            return res.status(404).json({ error: "Doctor profile not found." });
+        }
+
+        const doctorMpesaNumber = doctorData[0].phone;
+
+        if (!doctorMpesaNumber) {
+            return res.status(400).json({ error: "Doctor's M-Pesa number not found." });
+        }
+
+        const accessToken = await getAccessToken();
+
+        const initiatorName = process.env.MPESA_B2C_INITIATOR_NAME;
+        const securityCredential = process.env.MPESA_B2C_SECURITY_CREDENTIAL;
+        const shortCode = process.env.MPESA_SHORTCODE;
+        const queueTimeoutURL = process.env.MPESA_B2C_QUEUE_TIMEOUT_URL;
+        const resultURL = process.env.MPESA_B2C_RESULT_URL;
+
+        // Encrypt security credential
+        const encryptedSecurityCredential = CryptoJS.AES.encrypt(securityCredential, shortCode).toString();
+
+        const b2cData = {
+            InitiatorName: initiatorName,
+            SecurityCredential: encryptedSecurityCredential,
+            CommandID: "BusinessPayment",
+            Amount: amount,
+            PartyA: shortCode,
+            PartyB: doctorMpesaNumber,
+            Remarks: "Doctor Withdrawal",
+            QueueTimeOutURL: queueTimeoutURL,
+            ResultURL: resultURL,
+            Occasion: "Withdrawal",
+        };
+
+        const headers = {
+            Authorization: `Bearer ${accessToken}`,
+            "Content-Type": "application/json",
+        };
+
+        const response = await axios.post(process.env.MPESA_B2C_URL, b2cData, { headers });
+
+        console.log("M-Pesa B2C Response:", response.data);
+
+        res.json({ message: "Withdrawal initiated successfully", withdrawalDetails: response.data });
+    } catch (error) {
+        console.error("Error initiating withdrawal:", error);
+        res.status(500).json({ error: `Server error: ${error.message}` });
+    }
+});
+
+// M-Pesa B2C Queue Timeout Callback (Optional)
+mpesaRouter.post("/b2c/timeout", (req, res) => {
+    console.log("M-Pesa B2C Queue Timeout:", req.body);
+    res.sendStatus(200);
+});
+
+// M-Pesa B2C Result Callback
+mpesaRouter.post("/b2c/result", (req, res) => {
+    console.log("M-Pesa B2C Result:", req.body);
+    res.sendStatus(200);
 });
 
 // Function to get the access token required by the M-Pesa API
