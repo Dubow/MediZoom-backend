@@ -112,12 +112,27 @@ router.get("/profile", authenticateToken, async (req, res) => {
       return res.status(404).json({ error: "Doctor profile not found" });
     }
 
-    // Ensure you're sending the full profile_photo URL
-    const profilePhotoUrl = doctorProfile[0].profile_photo ? `http://192.168.10.7:5000${doctorProfile[0].profile_photo}` : null;
+    const profile = doctorProfile[0];
+    const profilePhotoUrl = profile.profile_photo ? `http://192.168.10.7:5000${profile.profile_photo}` : null;
+
+    // Ensure availability is a valid JSON object or an empty object
+    let availability;
+    try {
+      availability = profile.availability ? JSON.parse(profile.availability) : {};
+    } catch (e) {
+      console.error("Invalid availability JSON:", profile.availability);
+      availability = {}; 
+    }
 
     res.json({
-      ...doctorProfile[0],
-      profile_photo: profilePhotoUrl, // Send the full photo URL
+      name: profile.name,
+      specialization: profile.specialization,
+      country: profile.country,
+      summary: profile.summary,
+      rate: profile.rate,
+      phone: profile.phone,
+      availability, // Send as parsed object
+      profile_photo: profilePhotoUrl,
     });
   } catch (error) {
     console.error("Error fetching doctor profile:", error);
