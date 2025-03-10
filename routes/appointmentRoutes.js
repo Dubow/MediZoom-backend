@@ -70,6 +70,48 @@ router.post("/book", authenticateToken, async (req, res) => {
   }
 });
 
+// Get Client Appointments
+router.get("/client/appointments", authenticateToken, async (req, res) => {
+  const clientId = req.user.id;
+  try {
+    const [appointments] = await db.promise().query(
+      "SELECT * FROM appointments WHERE client_id = ?",
+      [clientId]
+    );
+    res.status(200).json(appointments);
+  } catch (error) {
+    console.error("Error fetching client appointments:", error);
+    res.status(500).json({ error: "Failed to fetch appointments" });
+  }
+});
+
+// Get Doctor's Appointments
+router.get("/doctor/appointments", authenticateToken, async (req, res) => {
+  console.log("GET /api/appointments/doctor/appointments hit");
+  const user = req.user;
+
+  // Restrict access to doctors only
+  if (user.role !== "doctor") {
+    console.log("Access denied: User is not a doctor, role:", user.role);
+    return res.status(403).json({ error: "Access denied: Only doctors can access this route" });
+  }
+
+  const doctorId = user.id;
+  console.log("Doctor ID from token:", doctorId);
+
+  try {
+    const [appointments] = await db.promise().query(
+      "SELECT * FROM appointments WHERE doctor_id = ? ORDER BY appointment_date ASC",
+      [doctorId]
+    );
+    console.log("Appointments fetched for doctorId:", doctorId, ":", appointments);
+    res.status(200).json(appointments);
+  } catch (error) {
+    console.error("Error fetching doctor appointments:", error.message);
+    res.status(500).json({ error: "An error occurred while fetching appointments." });
+  }
+});
+
 // M-Pesa Callback Route (to confirm payment and update status)
 router.post("/mpesa-callback", async (req, res) => {
   const { ResultCode, CheckoutRequestID, Amount, MpesaReceiptNumber, TransactionDate } = req.body.Body.stkCallback;
