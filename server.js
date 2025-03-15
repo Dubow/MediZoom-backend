@@ -6,6 +6,7 @@ const authRoutes = require("./routes/authRoutes");
 const doctorRoutes = require("./routes/doctorRoutes"); 
 const appointmentRoutes = require("./routes/appointmentRoutes");
 const mpesaRoutes = require("./routes/mpesaRoutes");
+const clientRoutes = require("./routes/clientRoutes");
 
 const app = express();
 app.use(express.json());
@@ -15,6 +16,7 @@ app.use("/api/doctor", doctorRoutes);
 app.use("/uploads", express.static("uploads"));
 app.use("/api/appointments", appointmentRoutes);
 app.use("/api/mpesa", mpesaRoutes);
+app.use("/api/clientprofile", clientRoutes);
 
 const db = mysql.createConnection({
   host: process.env.DB_HOST,

@@ -146,7 +146,7 @@ const cleanupExpiredAppointments = async () => {
       );
       console.log(`Expired appointments cleaned up: ${ids}`);
     } else {
-      console.log("No expired appointments to clean up.");
+      // console.log("No expired appointments to clean up.");
     }
   } catch (error) {
     console.error("Error cleaning up expired appointments:", error.message);

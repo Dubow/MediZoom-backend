@@ -124,5 +124,31 @@ router.post("/reset-password", async (req, res) => {
   }
 });
 
+// Get User Profile Data
+router.get("/clientprofile", async (req, res) => {
+  const token = req.headers.authorization?.split(" ")[1]; // Extract token from "Bearer <token>"
+
+  if (!token) {
+    return res.status(401).json({ error: "No token provided" });
+  }
+
+  try {
+    const decoded = jwt.verify(token, process.env.JWT_SECRET);
+    const userId = decoded.id;
+
+    const [results] = await db.promise().query("SELECT name, email FROM users WHERE id = ?", [userId]);
+
+    if (results.length === 0) {
+      return res.status(404).json({ error: "User not found" });
+    }
+
+    const user = results[0];
+    res.status(200).json({ name: user.name, email: user.email });
+  } catch (error) {
+    console.error("Error fetching profile:", error);
+    res.status(500).json({ error: "Failed to fetch profile data" });
+  }
+});
+
 
 module.exports = router;
