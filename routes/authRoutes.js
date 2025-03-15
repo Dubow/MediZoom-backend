@@ -150,5 +150,31 @@ router.get("/clientprofile", async (req, res) => {
   }
 });
 
+// Delete Client Account
+router.delete("/delete-account", async (req, res) => {
+  const token = req.headers.authorization?.split(" ")[1];
+
+  if (!token) {
+    return res.status(401).json({ error: "No token provided" });
+  }
+
+  try {
+    const decoded = jwt.verify(token, process.env.JWT_SECRET);
+    const userId = decoded.id;
+
+    // Delete the user from the users table (related data in client_profile and appointments will be deleted due to ON DELETE CASCADE)
+    const [result] = await db.promise().query("DELETE FROM users WHERE id = ?", [userId]);
+
+    if (result.affectedRows === 0) {
+      return res.status(404).json({ error: "User not found" });
+    }
+
+    res.status(200).json({ message: "Account deleted successfully" });
+  } catch (error) {
+    console.error("Error deleting account:", error);
+    res.status(500).json({ error: "Failed to delete account" });
+  }
+});
+
 
 module.exports = router;
