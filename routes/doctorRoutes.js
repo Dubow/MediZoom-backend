@@ -115,13 +115,21 @@ router.get("/profile", authenticateToken, async (req, res) => {
     const profile = doctorProfile[0];
     const profilePhotoUrl = profile.profile_photo ? `http://192.168.10.7:5000${profile.profile_photo}` : null;
 
-    // Ensure availability is a valid JSON object or an empty object
+    // Handle availability dynamically based on its type
     let availability;
-    try {
-      availability = profile.availability ? JSON.parse(profile.availability) : {};
-    } catch (e) {
-      console.error("Invalid availability JSON:", profile.availability);
-      availability = {}; 
+    if (!profile.availability) {
+      availability = {}; // Default to empty object if null/undefined
+    } else if (typeof profile.availability === "string") {
+      // If it's a string, parse it as JSON
+      try {
+        availability = JSON.parse(profile.availability);
+      } catch (e) {
+        console.error("Failed to parse availability string:", profile.availability, e);
+        availability = {}; // Fallback to empty object
+      }
+    } else {
+      // If it's already an object, use it directly
+      availability = profile.availability;
     }
 
     res.json({
