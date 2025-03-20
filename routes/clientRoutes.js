@@ -1,6 +1,6 @@
 const express = require("express");
 const jwt = require("jsonwebtoken");
-const db = require("../config/db");
+const { query } = require("../config/db"); // Use the query function from db.js for consistency
 const multer = require("multer");
 const path = require("path");
 const fs = require("fs");
@@ -25,7 +25,7 @@ const storage = multer.diskStorage({
 
 const upload = multer({
   storage: storage,
-  limits: { fileSize: 5 * 1024 * 1024 },
+  limits: { fileSize: 5 * 1024 * 1024 }, // 5MB limit
   fileFilter: (req, file, cb) => {
     const allowedTypes = /pdf|jpg|jpeg|png/;
     const extname = allowedTypes.test(path.extname(file.originalname).toLowerCase());
@@ -57,7 +57,7 @@ const authenticateToken = (req, res, next) => {
 router.get("/", authenticateToken, async (req, res) => {
   try {
     // Fetch client profile
-    const [profileResults] = await db.promise().query(
+    const profileResults = await query(
       "SELECT * FROM client_profile WHERE user_id = ?",
       [req.userId]
     );
@@ -70,15 +70,22 @@ router.get("/", authenticateToken, async (req, res) => {
     };
 
     // Fetch health records
-    const [healthRecords] = await db.promise().query(
+    const healthRecords = await query(
       "SELECT * FROM health_records WHERE user_id = ? ORDER BY uploaded_at DESC",
       [req.userId]
     );
 
-    res.status(200).json({ profile, healthRecords });
+    // Adjust file_path for Vercel deployment (remove hardcoded localhost URL)
+    const baseUrl = process.env.BASE_URL || "https://medizoom.vercel.app";
+    const updatedHealthRecords = healthRecords.map(record => ({
+      ...record,
+      file_path: record.file_path.replace("http://192.168.10.7:5000", baseUrl),
+    }));
+
+    res.status(200).json({ profile, healthRecords: updatedHealthRecords });
   } catch (error) {
-    console.error("Error fetching client profile and health records:", error);
-    res.status(500).json({ error: "Failed to fetch client profile and health records" });
+    console.error("Error fetching client profile and health records:", error.message);
+    res.status(500).json({ error: `Failed to fetch client profile and health records: ${error.message}` });
   }
 });
 
@@ -87,15 +94,29 @@ router.post("/", authenticateToken, upload.single("file"), async (req, res) => {
   const { phone_number, country_of_citizenship, date_of_birth, gender } = req.body;
 
   try {
+    // Input validation
+    if (phone_number && !phone_number.match(/^\+?\d{10,15}$/)) {
+      return res.status(400).json({ error: "Invalid phone number format. Use + followed by 10-15 digits." });
+    }
+    if (date_of_birth) {
+      const dob = new Date(date_of_birth);
+      if (isNaN(dob.getTime())) {
+        return res.status(400).json({ error: "Invalid date of birth. Use ISO format (e.g., 1990-01-01)." });
+      }
+    }
+    if (gender && !["Male", "Female", "Other"].includes(gender)) {
+      return res.status(400).json({ error: "Invalid gender. Use Male, Female, or Other." });
+    }
+
     // Update or insert client profile
-    const [existingProfile] = await db.promise().query(
+    const existingProfile = await query(
       "SELECT * FROM client_profile WHERE user_id = ?",
       [req.userId]
     );
 
     if (existingProfile.length > 0) {
       // Update existing profile
-      await db.promise().query(
+      await query(
         "UPDATE client_profile SET phone_number = ?, country_of_citizenship = ?, date_of_birth = ?, gender = ? WHERE user_id = ?",
         [
           phone_number || null,
@@ -107,7 +128,7 @@ router.post("/", authenticateToken, upload.single("file"), async (req, res) => {
       );
     } else {
       // Insert new profile
-      await db.promise().query(
+      await query(
         "INSERT INTO client_profile (user_id, phone_number, country_of_citizenship, date_of_birth, gender) VALUES (?, ?, ?, ?, ?)",
         [
           req.userId,
@@ -121,35 +142,44 @@ router.post("/", authenticateToken, upload.single("file"), async (req, res) => {
 
     // If a file is uploaded, save it to health_records
     if (req.file) {
-      await db.promise().query(
+      const baseUrl = process.env.BASE_URL || "https://medizoom.vercel.app";
+      const filePath = `${baseUrl}/uploads/health-records/${req.file.filename}`;
+      await query(
         "INSERT INTO health_records (user_id, file_name, file_path, uploaded_at) VALUES (?, ?, ?, ?)",
         [
           req.userId,
           req.file.originalname,
-          `http://192.168.10.7:5000/uploads/health-records/${req.file.filename}`,
+          filePath,
           new Date(),
         ]
       );
     }
 
     // Fetch the updated profile and health records
-    const [updatedProfile] = await db.promise().query(
+    const updatedProfile = await query(
       "SELECT * FROM client_profile WHERE user_id = ?",
       [req.userId]
     );
-    const [healthRecords] = await db.promise().query(
+    const healthRecords = await query(
       "SELECT * FROM health_records WHERE user_id = ? ORDER BY uploaded_at DESC",
       [req.userId]
     );
 
+    // Adjust file_path for Vercel deployment
+    const baseUrl = process.env.BASE_URL || "https://medizoom.vercel.app";
+    const updatedHealthRecords = healthRecords.map(record => ({
+      ...record,
+      file_path: record.file_path.replace("http://192.168.10.7:5000", baseUrl),
+    }));
+
     res.status(200).json({
       message: "Profile updated and health record added successfully",
       profile: updatedProfile[0],
-      healthRecords,
+      healthRecords: updatedHealthRecords,
     });
   } catch (error) {
-    console.error("Error saving client profile and health record:", error);
-    res.status(500).json({ error: "Failed to save client profile and health record" });
+    console.error("Error saving client profile and health record:", error.message);
+    res.status(500).json({ error: `Failed to save client profile and health record: ${error.message}` });
   }
 });
 
@@ -159,7 +189,7 @@ router.delete("/health-record/:id", authenticateToken, async (req, res) => {
 
   try {
     // Fetch the health record
-    const [record] = await db.promise().query(
+    const record = await query(
       "SELECT * FROM health_records WHERE id = ? AND user_id = ?",
       [recordId, req.userId]
     );
@@ -169,22 +199,23 @@ router.delete("/health-record/:id", authenticateToken, async (req, res) => {
     }
 
     // Delete the file from the server
-    const filePath = record[0].file_path.replace("http://192.168.10.7:5000", "");
+    const baseUrl = process.env.BASE_URL || "https://medizoom.vercel.app";
+    const filePath = record[0].file_path.replace(baseUrl, "");
     const absolutePath = path.join(__dirname, "..", filePath);
     if (fs.existsSync(absolutePath)) {
       fs.unlinkSync(absolutePath);
     }
 
     // Delete the record from the database
-    await db.promise().query(
+    await query(
       "DELETE FROM health_records WHERE id = ? AND user_id = ?",
       [recordId, req.userId]
     );
 
     res.status(200).json({ message: "Health record deleted successfully" });
   } catch (error) {
-    console.error("Error deleting health record:", error);
-    res.status(500).json({ error: "Failed to delete health record" });
+    console.error("Error deleting health record:", error.message);
+    res.status(500).json({ error: `Failed to delete health record: ${error.message}` });
   }
 });
 
