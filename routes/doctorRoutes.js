@@ -62,7 +62,7 @@ router.post("/profile", authenticateToken, upload.single("profile_photo"), async
       profilePhotoToStore = `/uploads/${req.file.filename}`;
     } else if (req.body.profile_photo) {
       // Existing photo URL or relative path sent in request body
-      const baseUrl = process.env.BASE_URL || "https://medizoom.vercel.app";
+      const baseUrl = process.env.BASE_URL || "https://medizoom.care";
       if (req.body.profile_photo.startsWith("http")) {
         // Extract relative path from full URL
         profilePhotoToStore = req.body.profile_photo.replace(baseUrl, "");
@@ -150,7 +150,7 @@ router.get("/profile", authenticateToken, async (req, res) => {
     }
 
     const profile = doctorProfile[0];
-    const baseUrl = process.env.BASE_URL || "https://medizoom.vercel.app";
+    const baseUrl = process.env.BASE_URL || "https://medizoom.care";
     const profilePhotoUrl = profile.profile_photo ? `${baseUrl}${profile.profile_photo}` : null;
 
     // Handle availability dynamically based on its type
@@ -197,7 +197,7 @@ router.get("/profiles", async (req, res) => {
     `);
 
     // Adjust profile_photo URLs for Vercel
-    const baseUrl = process.env.BASE_URL || "https://medizoom.vercel.app";
+    const baseUrl = process.env.BASE_URL || "https://medizoom.care";
     const updatedDoctors = doctors.map(doctor => ({
       ...doctor,
       profile_photo: doctor.profile_photo ? `${baseUrl}${doctor.profile_photo}` : null,
@@ -231,7 +231,7 @@ router.get("/profile/:id", async (req, res) => {
       return res.status(404).json({ message: "Doctor not found" });
     }
 
-    const baseUrl = process.env.BASE_URL || "https://medizoom.vercel.app";
+    const baseUrl = process.env.BASE_URL || "https://medizoom.care";
     const updatedDoctor = {
       ...doctor[0],
       profile_photo: doctor[0].profile_photo ? `${baseUrl}${doctor[0].profile_photo}` : null,
@@ -257,7 +257,7 @@ router.post("/upload-photo", authenticateToken, upload.single("profile_photo"), 
     console.log("Profile Photo Path:", profilePhoto);
     await query("UPDATE doctor_profile SET profile_photo = ? WHERE user_id = ?", [profilePhoto, userId]);
 
-    const baseUrl = process.env.BASE_URL || "https://medizoom.vercel.app";
+    const baseUrl = process.env.BASE_URL || "https://medizoom.care";
     res.status(200).json({ profilePhoto: `${baseUrl}${profilePhoto}` });
   } catch (error) {
     console.error("Error uploading profile photo:", error.message);

@@ -76,10 +76,10 @@ router.get("/", authenticateToken, async (req, res) => {
     );
 
     // Adjust file_path for Vercel deployment (remove hardcoded localhost URL)
-    const baseUrl = process.env.BASE_URL || "https://medizoom.vercel.app";
+    const baseUrl = process.env.BASE_URL || "https://medizoom.care";
     const updatedHealthRecords = healthRecords.map(record => ({
       ...record,
-      file_path: record.file_path.replace("http://192.168.10.7:5000", baseUrl),
+      file_path: record.file_path.replace("https://medizoom.care", baseUrl),
     }));
 
     res.status(200).json({ profile, healthRecords: updatedHealthRecords });
@@ -142,7 +142,7 @@ router.post("/", authenticateToken, upload.single("file"), async (req, res) => {
 
     // If a file is uploaded, save it to health_records
     if (req.file) {
-      const baseUrl = process.env.BASE_URL || "https://medizoom.vercel.app";
+      const baseUrl = process.env.BASE_URL || "https://medizoom.care";
       const filePath = `${baseUrl}/uploads/health-records/${req.file.filename}`;
       await query(
         "INSERT INTO health_records (user_id, file_name, file_path, uploaded_at) VALUES (?, ?, ?, ?)",
@@ -166,10 +166,10 @@ router.post("/", authenticateToken, upload.single("file"), async (req, res) => {
     );
 
     // Adjust file_path for Vercel deployment
-    const baseUrl = process.env.BASE_URL || "https://medizoom.vercel.app";
+    const baseUrl = process.env.BASE_URL || "https://medizoom.care";
     const updatedHealthRecords = healthRecords.map(record => ({
       ...record,
-      file_path: record.file_path.replace("http://192.168.10.7:5000", baseUrl),
+      file_path: record.file_path.replace("https://medizoom.care", baseUrl),
     }));
 
     res.status(200).json({
@@ -199,7 +199,7 @@ router.delete("/health-record/:id", authenticateToken, async (req, res) => {
     }
 
     // Delete the file from the server
-    const baseUrl = process.env.BASE_URL || "https://medizoom.vercel.app";
+    const baseUrl = process.env.BASE_URL || "https://medizoom.care";
     const filePath = record[0].file_path.replace(baseUrl, "");
     const absolutePath = path.join(__dirname, "..", filePath);
     if (fs.existsSync(absolutePath)) {
