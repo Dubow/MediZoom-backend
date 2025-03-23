@@ -132,9 +132,14 @@ router.post("/update-profile-status", authenticateToken, async (req, res) => {
 
 // Doctor Get Doctor Profile
 router.get("/profile", authenticateToken, async (req, res) => {
+  const startTime = Date.now();
   const userId = req.user.id;
 
   try {
+    console.log(`Starting profile fetch for userId: ${userId}`);
+
+    // Measure database query time
+    const queryStart = Date.now();
     const doctorProfile = await query(
       `
       SELECT u.name, u.specialization, dp.country, dp.summary, dp.rate, dp.phone, dp.availability, dp.profile_photo
@@ -144,8 +149,11 @@ router.get("/profile", authenticateToken, async (req, res) => {
       `,
       [userId]
     );
+    const queryEnd = Date.now();
+    console.log(`Database query took ${queryEnd - queryStart}ms`);
 
     if (doctorProfile.length === 0) {
+      console.log(`Profile not found for userId: ${userId}`);
       return res.status(404).json({ error: "Doctor profile not found" });
     }
 
@@ -153,7 +161,8 @@ router.get("/profile", authenticateToken, async (req, res) => {
     const baseUrl = process.env.BASE_URL || "https://www.medizoom.care";
     const profilePhotoUrl = profile.profile_photo ? `${baseUrl}${profile.profile_photo}` : null;
 
-    // Handle availability dynamically based on its type
+    // Measure availability parsing time
+    const parseStart = Date.now();
     let availability;
     if (!profile.availability) {
       availability = {};
@@ -167,6 +176,11 @@ router.get("/profile", authenticateToken, async (req, res) => {
     } else {
       availability = profile.availability;
     }
+    const parseEnd = Date.now();
+    console.log(`Availability parsing took ${parseEnd - parseStart}ms`);
+
+    const endTime = Date.now();
+    console.log(`Total profile fetch took ${endTime - startTime}ms`);
 
     res.json({
       name: profile.name,
