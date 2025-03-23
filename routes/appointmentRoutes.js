@@ -7,7 +7,8 @@ const router = express.Router();
 
 // Book an Appointment (Client -> Doctor)
 router.post("/book", authenticateToken, async (req, res) => {
-  const { doctorId, appointmentDate, phoneNumber, amount } = req.body;
+  const { doctorId, appointmentDate, amount } = req.body;
+  let { phoneNumber } = req.body;
   const clientId = req.user.id;
 
   try {
