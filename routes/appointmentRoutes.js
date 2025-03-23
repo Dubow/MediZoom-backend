@@ -1,9 +1,31 @@
+// In appointments.js
 const express = require("express");
-const { query } = require("../config/db"); // Use the query function from db.js for consistency
+const { query } = require("../config/db");
 const authenticateToken = require("../middleware/authMiddleware");
 const axios = require("axios");
 
 const router = express.Router();
+
+// Clean up expired appointments (helper function)
+const cleanupExpiredAppointments = async () => {
+  try {
+    const expiredAppointments = await query(
+      "SELECT id FROM appointments WHERE status = 'Pending Payment' AND created_at < NOW() - INTERVAL 15 MINUTE"
+    );
+
+    if (expiredAppointments.length > 0) {
+      const ids = expiredAppointments.map((app) => app.id);
+      await query("DELETE FROM appointments WHERE id IN (?)", [ids]);
+      console.log(`Cleaned up expired appointments: ${ids}`);
+      return ids; // Return deleted IDs for filtering if needed
+    }
+    console.log("No expired appointments to clean up.");
+    return [];
+  } catch (error) {
+    console.error("Error cleaning up expired appointments:", error.message);
+    throw error;
+  }
+};
 
 // Book an Appointment (Client -> Doctor)
 router.post("/book", authenticateToken, async (req, res) => {
@@ -12,19 +34,16 @@ router.post("/book", authenticateToken, async (req, res) => {
   const clientId = req.user.id;
 
   try {
-    // Input validation
     if (!doctorId || !appointmentDate || !phoneNumber || !amount) {
       return res.status(400).json({ error: "Missing required fields: doctorId, appointmentDate, phoneNumber, amount." });
     }
 
-    // Validate appointmentDate
     const date = new Date(appointmentDate);
     if (isNaN(date.getTime())) {
       return res.status(400).json({ error: "Invalid appointment date. Use ISO format (e.g., 2025-03-21T10:00:00.000Z)." });
     }
 
-    // Normalize phone number
-    phoneNumber = phoneNumber.replace(/\s/g, ""); // Remove spaces
+    phoneNumber = phoneNumber.replace(/\s/g, "");
     if (phoneNumber.startsWith("+254")) {
       phoneNumber = phoneNumber.replace("+254", "254");
     } else if (phoneNumber.startsWith("0")) {
@@ -35,12 +54,10 @@ router.post("/book", authenticateToken, async (req, res) => {
       return res.status(400).json({ error: "Invalid phone number format. Use 2547XXXXXXXX." });
     }
 
-    // Validate amount
     if (typeof amount !== "number" || amount <= 0) {
       return res.status(400).json({ error: "Amount must be a positive number." });
     }
 
-    // Check for existing appointment with "Pending Payment" status
     const existingAppointment = await query(
       "SELECT * FROM appointments WHERE client_id = ? AND doctor_id = ? AND appointment_date = ? AND status = 'Pending Payment'",
       [clientId, doctorId, appointmentDate]
@@ -49,12 +66,8 @@ router.post("/book", authenticateToken, async (req, res) => {
     let appointmentId;
     if (existingAppointment.length > 0) {
       appointmentId = existingAppointment[0].id;
-      await query(
-        "UPDATE appointments SET created_at = NOW() WHERE id = ?",
-        [appointmentId]
-      );
+      await query("UPDATE appointments SET created_at = NOW() WHERE id = ?", [appointmentId]);
     } else {
-      // Check for conflicting appointments
       const conflictAppointment = await query(
         "SELECT * FROM appointments WHERE doctor_id = ? AND appointment_date = ? AND status != 'Pending Payment'",
         [doctorId, appointmentDate]
@@ -64,7 +77,6 @@ router.post("/book", authenticateToken, async (req, res) => {
         return res.status(400).json({ message: "Doctor is already booked at this time." });
       }
 
-      // Insert new appointment
       const insertedAppointment = await query(
         "INSERT INTO appointments (client_id, doctor_id, appointment_date, amount, phone_number, status, created_at) VALUES (?, ?, ?, ?, ?, ?, NOW())",
         [clientId, doctorId, appointmentDate, amount, phoneNumber, "Pending Payment"]
@@ -72,7 +84,6 @@ router.post("/book", authenticateToken, async (req, res) => {
       appointmentId = insertedAppointment.insertId;
     }
 
-    // Initiate MPESA payment
     const paymentResponse = await axios.post(process.env.MPESA_PAYMENT_URL, {
       doctorId,
       amount,
@@ -88,7 +99,6 @@ router.post("/book", authenticateToken, async (req, res) => {
         appointmentId,
       });
     } else {
-      // Delete the appointment if payment initiation fails
       await query("DELETE FROM appointments WHERE id = ?", [appointmentId]);
       console.error("Payment initiation failed:", paymentResponse.data);
       return res.status(500).json({ message: "Payment initiation failed.", paymentResponse: paymentResponse.data });
@@ -103,6 +113,9 @@ router.post("/book", authenticateToken, async (req, res) => {
 router.get("/client/appointments", authenticateToken, async (req, res) => {
   const clientId = req.user.id;
   try {
+    // Clean up expired appointments before fetching
+    await cleanupExpiredAppointments();
+
     const appointments = await query(
       `
       SELECT 
@@ -160,33 +173,5 @@ router.get("/doctor/appointments", authenticateToken, async (req, res) => {
     res.status(500).json({ error: `Failed to fetch doctor appointments: ${error.message}` });
   }
 });
-
-// Cleanup Expired Appointments (Note: This won't work in Vercel's serverless environment)
-const cleanupExpiredAppointments = async () => {
-  try {
-    const expiredAppointments = await query(
-      "SELECT id FROM appointments WHERE status = 'Pending Payment' AND created_at < NOW() - INTERVAL 15 MINUTE"
-    );
-
-    if (expiredAppointments.length > 0) {
-      const ids = expiredAppointments.map(app => app.id);
-      await query(
-        "DELETE FROM appointments WHERE id IN (?)",
-        [ids]
-      );
-      console.log(`Expired appointments cleaned up: ${ids}`);
-    } else {
-      console.log("No expired appointments to clean up.");
-    }
-  } catch (error) {
-    console.error("Error cleaning up expired appointments:", error.message);
-  }
-};
-
-// Note: setInterval won't work in Vercel's serverless environment
-// Consider using Vercel's cron jobs or an external scheduler instead
-if (process.env.NODE_ENV !== "production") {
-  setInterval(cleanupExpiredAppointments, 5 * 60 * 1000);
-}
 
 module.exports = router;
