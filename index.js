@@ -7,6 +7,7 @@ const doctorRoutes = require("./routes/doctorRoutes");
 const appointmentRoutes = require("./routes/appointmentRoutes");
 const mpesaRoutes = require("./routes/mpesaRoutes");
 const clientRoutes = require("./routes/clientRoutes");
+const adminRoutes = require("./routes/adminRoutes");
 const path = require("path");
 
 const app = express();
@@ -25,6 +26,7 @@ app.use("/api/doctor", doctorRoutes);
 app.use("/api/appointments", appointmentRoutes);
 app.use("/api/mpesa", mpesaRoutes);
 app.use("/api/clientprofile", clientRoutes);
+app.use("/api/admin", adminRoutes);
 
 // Export the app as a Vercel serverless function
 module.exports = app;

@@ -2,7 +2,7 @@ const express = require('express');
 const bcrypt = require('bcryptjs');
 const jwt = require('jsonwebtoken');
 const crypto = require('crypto');
-const { query } = require('../config/db'); // Import the new query function
+const { query } = require('../config/db');
 const sendEmail = require('../config/email');
 
 const router = express.Router();
@@ -20,8 +20,8 @@ router.post('/signup', async (req, res) => {
     const hashedPassword = await bcrypt.hash(password, 10);
     const verificationCode = crypto.randomInt(100000, 999999).toString();
 
-    const sql = 'INSERT INTO users (name, email, password, role, specialization, verification_code, verified, profileCompleted) VALUES (?, ?, ?, ?, ?, ?, ?, ?)';
-    await query(sql, [name, email, hashedPassword, role, specialization || null, verificationCode, false, false]);
+    const sql = 'INSERT INTO users (name, email, password, role, specialization, verification_code, verified, profileCompleted, status) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)';
+    await query(sql, [name, email, hashedPassword, role, specialization || null, verificationCode, false, false, 'active']);
 
     await sendEmail(email, 'Verify Your Email', `Your verification code is: ${verificationCode}`);
 
@@ -63,12 +63,27 @@ router.post('/login', async (req, res) => {
 
     if (!user.verified) return res.status(403).json({ error: 'Please verify your email first' });
 
+    if (user.status === 'suspended') return res.status(403).json({ error: 'Account suspended' });
+
     const isMatch = await bcrypt.compare(password, user.password);
     if (!isMatch) return res.status(401).json({ error: 'Invalid credentials' });
 
-    const token = jwt.sign({ id: user.id, role: user.role }, process.env.JWT_SECRET, { expiresIn: '1h' });
+    const token = jwt.sign(
+      { id: user.id, role: user.role, status: user.status },
+      process.env.JWT_SECRET,
+      { expiresIn: '1h' }
+    );
 
-    res.json({ token, user: { id: user.id, name: user.name, role: user.role, profileCompleted: user.profileCompleted } });
+    res.json({
+      token,
+      user: {
+        id: user.id,
+        name: user.name,
+        role: user.role,
+        profileCompleted: user.profileCompleted,
+        status: user.status
+      }
+    });
   } catch (error) {
     res.status(500).json({ error: error.message });
   }
@@ -121,7 +136,7 @@ router.post('/reset-password', async (req, res) => {
 
 // Get User Profile Data
 router.get('/clientprofile', async (req, res) => {
-  const token = req.headers.authorization?.split(' ')[1]; // Extract token from "Bearer <token>"
+  const token = req.headers.authorization?.split(' ')[1];
 
   if (!token) {
     return res.status(401).json({ error: 'No token provided' });
@@ -157,7 +172,6 @@ router.delete('/delete-account', async (req, res) => {
     const decoded = jwt.verify(token, process.env.JWT_SECRET);
     const userId = decoded.id;
 
-    // Delete the user from the users table (related data in client_profile and appointments will be deleted due to ON DELETE CASCADE)
     const result = await query('DELETE FROM users WHERE id = ?', [userId]);
 
     if (result.affectedRows === 0) {

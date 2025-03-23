@@ -1,4 +1,3 @@
-// In appointments.js
 const express = require("express");
 const { query } = require("../config/db");
 const authenticateToken = require("../middleware/authMiddleware");
@@ -17,7 +16,7 @@ const cleanupExpiredAppointments = async () => {
       const ids = expiredAppointments.map((app) => app.id);
       await query("DELETE FROM appointments WHERE id IN (?)", [ids]);
       console.log(`Cleaned up expired appointments: ${ids}`);
-      return ids; // Return deleted IDs for filtering if needed
+      return ids;
     }
     console.log("No expired appointments to clean up.");
     return [];
@@ -28,7 +27,7 @@ const cleanupExpiredAppointments = async () => {
 };
 
 // Book an Appointment (Client -> Doctor)
-router.post("/book", authenticateToken, async (req, res) => {
+router.post("/book", authenticateToken("client"), async (req, res) => {
   const { doctorId, appointmentDate, amount } = req.body;
   let { phoneNumber } = req.body;
   const clientId = req.user.id;
@@ -110,10 +109,9 @@ router.post("/book", authenticateToken, async (req, res) => {
 });
 
 // Get Client Appointments
-router.get("/client/appointments", authenticateToken, async (req, res) => {
+router.get("/client/appointments", authenticateToken("client"), async (req, res) => {
   const clientId = req.user.id;
   try {
-    // Clean up expired appointments before fetching
     await cleanupExpiredAppointments();
 
     const appointments = await query(
@@ -149,14 +147,9 @@ router.get("/client/appointments", authenticateToken, async (req, res) => {
 });
 
 // Get Doctor's Appointments
-router.get("/doctor/appointments", authenticateToken, async (req, res) => {
+router.get("/doctor/appointments", authenticateToken("doctor"), async (req, res) => {
   console.log("GET /api/appointments/doctor/appointments hit");
   const user = req.user;
-
-  if (user.role !== "doctor") {
-    console.log("Access denied: User is not a doctor, role:", user.role);
-    return res.status(403).json({ error: "Access denied: Only doctors can access this route" });
-  }
 
   const doctorId = user.id;
   console.log("Doctor ID from token:", doctorId);
