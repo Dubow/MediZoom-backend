@@ -22,7 +22,14 @@ router.post("/book", authenticateToken, async (req, res) => {
       return res.status(400).json({ error: "Invalid appointment date. Use ISO format (e.g., 2025-03-21T10:00:00.000Z)." });
     }
 
-    // Validate phoneNumber (MPESA format: 2547XXXXXXXX)
+    // Normalize phone number
+    phoneNumber = phoneNumber.replace(/\s/g, ""); // Remove spaces
+    if (phoneNumber.startsWith("+254")) {
+      phoneNumber = phoneNumber.replace("+254", "254");
+    } else if (phoneNumber.startsWith("0")) {
+      phoneNumber = "254" + phoneNumber.slice(1);
+    }
+
     if (!phoneNumber.match(/^2547\d{8}$/)) {
       return res.status(400).json({ error: "Invalid phone number format. Use 2547XXXXXXXX." });
     }
