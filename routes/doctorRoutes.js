@@ -8,12 +8,18 @@ const cloudinary = require("cloudinary").v2;
 const router = express.Router();
 
 // Set up Cloudinary storage for Multer
+cloudinary.config({
+  cloud_name: process.env.CLOUDINARY_CLOUD_NAME,
+  api_key: process.env.CLOUDINARY_API_KEY,
+  api_secret: process.env.CLOUDINARY_API_SECRET,
+});
+
 const storage = new CloudinaryStorage({
   cloudinary: cloudinary,
   params: {
-    folder: "doctor_profiles", // Store files in a folder named "doctor_profiles" on Cloudinary
+    folder: "doctor_profiles",
     allowed_formats: ["jpg", "jpeg", "png"],
-    public_id: (req, file) => `${req.user.id}-${Date.now()}`, // Unique file name based on user ID and timestamp
+    public_id: (req, file) => `${req.user.id}-${Date.now()}`,
   },
 });
 
@@ -21,22 +27,46 @@ const upload = multer({
   storage: storage,
   limits: { fileSize: 5 * 1024 * 1024 }, // 5MB limit
   fileFilter: (req, file, cb) => {
-    const allowedTypes = /jpg|jpeg|png/;
-    const extname = allowedTypes.test(file.mimetype.toLowerCase());
-    if (extname) {
+    const filetypes = /jpeg|jpg|png/;
+    const mimetype = filetypes.test(file.mimetype);
+    if (mimetype) {
       return cb(null, true);
     }
     cb(new Error("Only JPG, JPEG, and PNG files are allowed"));
   },
 });
 
+const uploadWithTimeout = (req, res, next) => {
+  const uploadMiddleware = upload.single("profile_photo");
+  const timeout = 20000; // 20 seconds
+
+  return Promise.race([
+    new Promise((resolve, reject) => {
+      uploadMiddleware(req, res, (err) => {
+        if (err) return reject(err);
+        resolve();
+      });
+    }),
+    new Promise((_, reject) =>
+      setTimeout(() => reject(new Error("Upload to Cloudinary timed out")), timeout)
+    ),
+  ])
+    .then(() => next())
+    .catch((err) => {
+      console.error("Upload error:", err.message);
+      res.status(500).json({ error: "Failed to upload file to Cloudinary. Please try again." });
+    });
+};
+
 // Profile Update Route for Doctor (Including Profile Photo)
-router.post("/profile", authenticateToken, upload.single("profile_photo"), async (req, res) => {
+router.post("/profile", authenticateToken("doctor"), upload.single("profile_photo"), async (req, res) => {
   const { country, summary, rate, phone, availability } = req.body;
   const userId = req.user.id;
   let profilePhotoToStore = null;
 
   try {
+    console.log("Received profile update request:", { country, summary, rate, phone, availability });
+
     // Input validation
     if (phone && !phone.match(/^\+?\d{10,15}$/)) {
       return res.status(400).json({ error: "Invalid phone number format. Use + followed by 10-15 digits." });
@@ -54,24 +84,31 @@ router.post("/profile", authenticateToken, upload.single("profile_photo"), async
 
     // Handle profile photo
     if (req.file) {
-      // New file uploaded to Cloudinary, use the secure URL
+      console.log("New file uploaded to Cloudinary");
       profilePhotoToStore = req.file.path; // Cloudinary provides the secure URL in req.file.path
     } else if (req.body.profile_photo) {
-      // Existing photo URL sent in request body
+      console.log("Using existing profile photo URL:", req.body.profile_photo);
       profilePhotoToStore = req.body.profile_photo;
+      // Validate the URL (basic check)
+      if (!profilePhotoToStore.startsWith("https://res.cloudinary.com")) {
+        console.warn("Invalid profile photo URL:", profilePhotoToStore);
+        profilePhotoToStore = null; // Ignore invalid URLs
+      }
     } else {
-      // No new file uploaded and no existing photo provided
+      console.log("No new file uploaded, checking existing profile photo");
       const existingProfile = await query("SELECT profile_photo FROM doctor_profile WHERE user_id = ?", [userId]);
       if (existingProfile.length > 0 && existingProfile[0].profile_photo) {
         profilePhotoToStore = existingProfile[0].profile_photo;
       }
     }
 
+    console.log("Profile photo to store:", profilePhotoToStore);
+
     // Check if the doctor already has a profile
     const existingProfile = await query("SELECT * FROM doctor_profile WHERE user_id = ?", [userId]);
 
     if (existingProfile.length > 0) {
-      // Update existing profile
+      console.log("Updating existing profile for user:", userId);
       await query(
         `
         UPDATE doctor_profile
@@ -81,7 +118,7 @@ router.post("/profile", authenticateToken, upload.single("profile_photo"), async
         [country, summary, rate, phone, availability, profilePhotoToStore, userId]
       );
     } else {
-      // Create a new profile
+      console.log("Creating new profile for user:", userId);
       await query(
         `
         INSERT INTO doctor_profile (user_id, country, summary, rate, phone, availability, profile_photo)
@@ -91,7 +128,7 @@ router.post("/profile", authenticateToken, upload.single("profile_photo"), async
       );
     }
 
-    // Update profileCompleted status
+    console.log("Updating profileCompleted status for user:", userId);
     await query("UPDATE users SET profileCompleted = true WHERE id = ?", [userId]);
 
     res.status(200).json({ message: "Profile updated successfully!" });
@@ -233,7 +270,7 @@ router.get("/profile/:id", async (req, res) => {
 });
 
 // Profile Photo Upload Route
-router.post("/upload-photo", authenticateToken, upload.single("profile_photo"), async (req, res) => {
+router.post("/upload-photo", authenticateToken("doctor"), uploadWithTimeout, async (req, res) => {
   if (!req.file) {
     return res.status(400).json({ error: "No file uploaded" });
   }
@@ -243,12 +280,28 @@ router.post("/upload-photo", authenticateToken, upload.single("profile_photo"), 
 
   try {
     console.log("Profile Photo URL:", profilePhoto);
-    await query("UPDATE doctor_profile SET profile_photo = ? WHERE user_id = ?", [profilePhoto, userId]);
+
+    const existingProfile = await query("SELECT * FROM doctor_profile WHERE user_id = ?", [userId]);
+
+    if (existingProfile.length === 0) {
+      await query(
+        `
+        INSERT INTO doctor_profile (user_id, profile_photo)
+        VALUES (?, ?)
+        `,
+        [userId, profilePhoto]
+      );
+    } else {
+      await query(
+        "UPDATE doctor_profile SET profile_photo = ? WHERE user_id = ?",
+        [profilePhoto, userId]
+      );
+    }
 
     res.status(200).json({ profilePhoto });
   } catch (error) {
     console.error("Error uploading profile photo:", error.message);
-    res.status(500).json({ error: `Failed to upload profile photo: ${error.message}` });
+    res.status(500).json({ error: "Failed to upload profile photo. Please try again." });
   }
 });
 
