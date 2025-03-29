@@ -120,7 +120,7 @@ router.post("/update-profile-status", authenticateToken, async (req, res) => {
 });
 
 // Doctor Get Doctor Profile
-router.get("/profile", authenticateToken, async (req, res) => {
+router.get("/profile", authenticateToken("doctor"), async (req, res) => {
   const userId = req.user.id;
 
   try {
@@ -139,40 +139,40 @@ router.get("/profile", authenticateToken, async (req, res) => {
     }
 
     const profile = doctorProfile[0];
-    // No need to append baseUrl since Cloudinary URLs are absolute
     const profilePhotoUrl = profile.profile_photo || null;
 
-    // Handle availability dynamically based on its type
     let availability;
     if (!profile.availability) {
       availability = {};
     } else if (typeof profile.availability === "string") {
       try {
         availability = JSON.parse(profile.availability);
+        if (!availability || typeof availability !== "object") {
+          availability = {};
+        }
       } catch (e) {
         console.error("Failed to parse availability string:", profile.availability, e);
         availability = {};
       }
     } else {
-      availability = profile.availability;
+      availability = profile.availability || {};
     }
 
     res.json({
-      name: profile.name,
-      specialization: profile.specialization,
-      country: profile.country,
-      summary: profile.summary,
-      rate: profile.rate,
-      phone: profile.phone,
+      name: profile.name || "",
+      specialization: profile.specialization || "",
+      country: profile.country || "",
+      summary: profile.summary || "",
+      rate: profile.rate ? profile.rate.toString() : "",
+      phone: profile.phone || "",
       availability,
       profile_photo: profilePhotoUrl,
     });
   } catch (error) {
     console.error("Error fetching doctor profile:", error.message);
-    res.status(500).json({ error: `Failed to fetch doctor profile: ${error.message}` });
+    res.status(500).json({ error: "Failed to fetch doctor profile. Please try again later." });
   }
 });
-
 // Client Get All Doctors
 router.get("/profiles", async (req, res) => {
   try {
