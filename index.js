@@ -33,11 +33,9 @@ app.use("/api/mpesa", mpesaRoutes);
 app.use("/api/clientprofile", clientRoutes);
 app.use("/api/admin", adminRoutes);
 
-// Export the app as a Vercel serverless function
-module.exports = app;
+// Start the server
+const PORT = process.env.PORT || 5000;
+app.listen(PORT, () => console.log(`Server running on port ${PORT}`));
 
-// For local development, start the server
-if (process.env.NODE_ENV !== "production") {
-  const PORT = process.env.PORT || 5000;
-  app.listen(PORT, () => console.log(`Server running on port ${PORT}`));
-}
+// Export the app as a Vercel serverless function (optional, can be removed for Heroku)
+module.exports = app;
