@@ -1,25 +1,20 @@
 const express = require("express");
 const jwt = require("jsonwebtoken");
-const { query } = require("../config/db"); // Use the query function from db.js for consistency
+const { query } = require("../config/db");
 const multer = require("multer");
-const path = require("path");
-const fs = require("fs");
+const { CloudinaryStorage } = require("multer-storage-cloudinary");
+const cloudinary = require("cloudinary").v2;
 
 const router = express.Router();
 
-// Configure Multer for file uploads
-const storage = multer.diskStorage({
-  destination: (req, file, cb) => {
-    const uploadDir = "uploads/health-records/";
-    // Create directory if it doesn't exist
-    if (!fs.existsSync(uploadDir)) {
-      fs.mkdirSync(uploadDir, { recursive: true });
-    }
-    cb(null, uploadDir);
-  },
-  filename: (req, file, cb) => {
-    const uniqueSuffix = Date.now() + "-" + Math.round(Math.random() * 1e9);
-    cb(null, uniqueSuffix + path.extname(file.originalname));
+// Configure Cloudinary storage for Multer
+const storage = new CloudinaryStorage({
+  cloudinary: cloudinary,
+  params: {
+    folder: "health_records", // Store files in a folder named "health_records" on Cloudinary
+    allowed_formats: ["pdf", "jpg", "jpeg", "png"],
+    public_id: (req, file) => `${req.userId}-${Date.now()}`, // Unique file name based on user ID and timestamp
+    resource_type: "auto", // Automatically detect file type (image or raw for PDFs)
   },
 });
 
@@ -28,9 +23,8 @@ const upload = multer({
   limits: { fileSize: 5 * 1024 * 1024 }, // 5MB limit
   fileFilter: (req, file, cb) => {
     const allowedTypes = /pdf|jpg|jpeg|png/;
-    const extname = allowedTypes.test(path.extname(file.originalname).toLowerCase());
-    const mimetype = allowedTypes.test(file.mimetype);
-    if (extname && mimetype) {
+    const extname = allowedTypes.test(file.mimetype.toLowerCase());
+    if (extname) {
       return cb(null, true);
     }
     cb(new Error("Only PDF, JPG, JPEG, and PNG files are allowed"));
@@ -75,11 +69,10 @@ router.get("/", authenticateToken, async (req, res) => {
       [req.userId]
     );
 
-    // Adjust file_path for Vercel deployment (remove hardcoded localhost URL)
-    const baseUrl = process.env.BASE_URL || "https://www.medizoom.care";
+    // Cloudinary URLs are absolute, no need to adjust
     const updatedHealthRecords = healthRecords.map(record => ({
       ...record,
-      file_path: record.file_path.replace("https://www.medizoom.care", baseUrl),
+      file_path: record.file_path || null,
     }));
 
     res.status(200).json({ profile, healthRecords: updatedHealthRecords });
@@ -141,9 +134,9 @@ router.post("/", authenticateToken, upload.single("file"), async (req, res) => {
     }
 
     // If a file is uploaded, save it to health_records
+    let filePath = null;
     if (req.file) {
-      const baseUrl = process.env.BASE_URL || "https://www.medizoom.care";
-      const filePath = `${baseUrl}/uploads/health-records/${req.file.filename}`;
+      filePath = req.file.path; // Cloudinary secure URL
       await query(
         "INSERT INTO health_records (user_id, file_name, file_path, uploaded_at) VALUES (?, ?, ?, ?)",
         [
@@ -165,11 +158,10 @@ router.post("/", authenticateToken, upload.single("file"), async (req, res) => {
       [req.userId]
     );
 
-    // Adjust file_path for Vercel deployment
-    const baseUrl = process.env.BASE_URL || "https://www.medizoom.care";
+    // Cloudinary URLs are absolute, no need to adjust
     const updatedHealthRecords = healthRecords.map(record => ({
       ...record,
-      file_path: record.file_path.replace("https://www.medizoom.care", baseUrl),
+      file_path: record.file_path || null,
     }));
 
     res.status(200).json({
@@ -198,12 +190,11 @@ router.delete("/health-record/:id", authenticateToken, async (req, res) => {
       return res.status(404).json({ error: "Health record not found" });
     }
 
-    // Delete the file from the server
-    const baseUrl = process.env.BASE_URL || "https://www.medizoom.care";
-    const filePath = record[0].file_path.replace(baseUrl, "");
-    const absolutePath = path.join(__dirname, "..", filePath);
-    if (fs.existsSync(absolutePath)) {
-      fs.unlinkSync(absolutePath);
+    // Delete the file from Cloudinary
+    const filePath = record[0].file_path;
+    if (filePath) {
+      const publicId = filePath.split("/").slice(-2).join("/").split(".").slice(0, -1).join("."); // Extract public ID (e.g., health_records/userid-timestamp)
+      await cloudinary.uploader.destroy(publicId, { resource_type: filePath.includes(".pdf") ? "raw" : "image" });
     }
 
     // Delete the record from the database

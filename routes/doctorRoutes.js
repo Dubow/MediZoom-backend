@@ -1,22 +1,19 @@
 const express = require("express");
-const { query } = require("../config/db"); // Use the query function from db.js
+const { query } = require("../config/db");
 const authenticateToken = require("../middleware/authMiddleware");
 const multer = require("multer");
-const path = require("path");
+const { CloudinaryStorage } = require("multer-storage-cloudinary");
+const cloudinary = require("cloudinary").v2;
 
 const router = express.Router();
 
-// Set up storage for Multer (saving files to the 'uploads' directory)
-const storage = multer.diskStorage({
-  destination: (req, file, cb) => {
-    const uploadDir = "uploads/";
-    if (!fs.existsSync(uploadDir)) {
-      fs.mkdirSync(uploadDir, { recursive: true });
-    }
-    cb(null, uploadDir);
-  },
-  filename: (req, file, cb) => {
-    cb(null, Date.now() + path.extname(file.originalname)); // Unique filename
+// Set up Cloudinary storage for Multer
+const storage = new CloudinaryStorage({
+  cloudinary: cloudinary,
+  params: {
+    folder: "doctor_profiles", // Store files in a folder named "doctor_profiles" on Cloudinary
+    allowed_formats: ["jpg", "jpeg", "png"],
+    public_id: (req, file) => `${req.user.id}-${Date.now()}`, // Unique file name based on user ID and timestamp
   },
 });
 
@@ -25,9 +22,8 @@ const upload = multer({
   limits: { fileSize: 5 * 1024 * 1024 }, // 5MB limit
   fileFilter: (req, file, cb) => {
     const allowedTypes = /jpg|jpeg|png/;
-    const extname = allowedTypes.test(path.extname(file.originalname).toLowerCase());
-    const mimetype = allowedTypes.test(file.mimetype);
-    if (extname && mimetype) {
+    const extname = allowedTypes.test(file.mimetype.toLowerCase());
+    if (extname) {
       return cb(null, true);
     }
     cb(new Error("Only JPG, JPEG, and PNG files are allowed"));
@@ -50,7 +46,7 @@ router.post("/profile", authenticateToken, upload.single("profile_photo"), async
     }
     if (availability) {
       try {
-        JSON.parse(availability); // Ensure availability is valid JSON
+        JSON.parse(availability);
       } catch (e) {
         return res.status(400).json({ error: "Invalid availability format. Must be a valid JSON string." });
       }
@@ -58,18 +54,11 @@ router.post("/profile", authenticateToken, upload.single("profile_photo"), async
 
     // Handle profile photo
     if (req.file) {
-      // New file uploaded, use relative path
-      profilePhotoToStore = `/uploads/${req.file.filename}`;
+      // New file uploaded to Cloudinary, use the secure URL
+      profilePhotoToStore = req.file.path; // Cloudinary provides the secure URL in req.file.path
     } else if (req.body.profile_photo) {
-      // Existing photo URL or relative path sent in request body
-      const baseUrl = process.env.BASE_URL || "https://www.medizoom.care";
-      if (req.body.profile_photo.startsWith("http")) {
-        // Extract relative path from full URL
-        profilePhotoToStore = req.body.profile_photo.replace(baseUrl, "");
-      } else {
-        // Relative path already provided
-        profilePhotoToStore = req.body.profile_photo;
-      }
+      // Existing photo URL sent in request body
+      profilePhotoToStore = req.body.profile_photo;
     } else {
       // No new file uploaded and no existing photo provided
       const existingProfile = await query("SELECT profile_photo FROM doctor_profile WHERE user_id = ?", [userId]);
@@ -150,8 +139,8 @@ router.get("/profile", authenticateToken, async (req, res) => {
     }
 
     const profile = doctorProfile[0];
-    const baseUrl = process.env.BASE_URL || "https://www.medizoom.care";
-    const profilePhotoUrl = profile.profile_photo ? `${baseUrl}${profile.profile_photo}` : null;
+    // No need to append baseUrl since Cloudinary URLs are absolute
+    const profilePhotoUrl = profile.profile_photo || null;
 
     // Handle availability dynamically based on its type
     let availability;
@@ -196,11 +185,10 @@ router.get("/profiles", async (req, res) => {
         users u ON u.id = dp.user_id
     `);
 
-    // Adjust profile_photo URLs for Vercel
-    const baseUrl = process.env.BASE_URL || "https://www.medizoom.care";
+    // No need to adjust profile_photo URLs since Cloudinary URLs are absolute
     const updatedDoctors = doctors.map(doctor => ({
       ...doctor,
-      profile_photo: doctor.profile_photo ? `${baseUrl}${doctor.profile_photo}` : null,
+      profile_photo: doctor.profile_photo || null,
     }));
 
     res.status(200).json(updatedDoctors);
@@ -231,10 +219,10 @@ router.get("/profile/:id", async (req, res) => {
       return res.status(404).json({ message: "Doctor not found" });
     }
 
-    const baseUrl = process.env.BASE_URL || "https://www.medizoom.care";
+    // No need to adjust profile_photo URL since Cloudinary URLs are absolute
     const updatedDoctor = {
       ...doctor[0],
-      profile_photo: doctor[0].profile_photo ? `${baseUrl}${doctor[0].profile_photo}` : null,
+      profile_photo: doctor[0].profile_photo || null,
     };
 
     res.status(200).json(updatedDoctor);
@@ -250,15 +238,14 @@ router.post("/upload-photo", authenticateToken, upload.single("profile_photo"), 
     return res.status(400).json({ error: "No file uploaded" });
   }
 
-  const profilePhoto = `/uploads/${req.file.filename}`;
+  const profilePhoto = req.file.path; // Cloudinary secure URL
   const userId = req.user.id;
 
   try {
-    console.log("Profile Photo Path:", profilePhoto);
+    console.log("Profile Photo URL:", profilePhoto);
     await query("UPDATE doctor_profile SET profile_photo = ? WHERE user_id = ?", [profilePhoto, userId]);
 
-    const baseUrl = process.env.BASE_URL || "https://www.medizoom.care";
-    res.status(200).json({ profilePhoto: `${baseUrl}${profilePhoto}` });
+    res.status(200).json({ profilePhoto });
   } catch (error) {
     console.error("Error uploading profile photo:", error.message);
     res.status(500).json({ error: `Failed to upload profile photo: ${error.message}` });
