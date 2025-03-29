@@ -272,6 +272,7 @@ router.get("/profile/:id", async (req, res) => {
 // Profile Photo Upload Route
 router.post("/upload-photo", authenticateToken("doctor"), uploadWithTimeout, async (req, res) => {
   if (!req.file) {
+    console.error("No file uploaded in request.");
     return res.status(400).json({ error: "No file uploaded" });
   }
 
@@ -284,14 +285,16 @@ router.post("/upload-photo", authenticateToken("doctor"), uploadWithTimeout, asy
     const existingProfile = await query("SELECT * FROM doctor_profile WHERE user_id = ?", [userId]);
 
     if (existingProfile.length === 0) {
+      console.log("Creating new doctor_profile record for user:", userId);
       await query(
         `
-        INSERT INTO doctor_profile (user_id, profile_photo)
-        VALUES (?, ?)
+        INSERT INTO doctor_profile (user_id, profile_photo, country, summary, rate, phone, availability)
+        VALUES (?, ?, ?, ?, ?, ?, ?)
         `,
-        [userId, profilePhoto]
+        [userId, profilePhoto, "", "", 0, "", "{}"] // Default values for required fields
       );
     } else {
+      console.log("Updating existing doctor_profile record for user:", userId);
       await query(
         "UPDATE doctor_profile SET profile_photo = ? WHERE user_id = ?",
         [profilePhoto, userId]
