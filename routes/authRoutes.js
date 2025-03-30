@@ -23,10 +23,19 @@ router.post('/signup', async (req, res) => {
     const sql = 'INSERT INTO users (name, email, password, role, specialization, verification_code, verified, profileCompleted, status) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)';
     await query(sql, [name, email, hashedPassword, role, specialization || null, verificationCode, false, false, 'active']);
 
-    await sendEmail(email, 'Verify Your Email', `Your verification code is: ${verificationCode}`);
+    // Attempt to send email and catch any failure
+    await sendEmail(
+      email,
+      'Verify Your Email - Medizoom',
+      `Hello ${name},\n\nYour verification code is: ${verificationCode}\n\nPlease enter this code to verify your account.\n\nThank you,\nMedizoom Team`
+    );
 
     res.json({ message: 'Signup successful. Check your email for verification code.' });
   } catch (error) {
+    console.error('Signup error:', error.message);
+    if (error.message.includes('Email sending failed')) {
+      return res.status(500).json({ error: 'Failed to send verification email. Please try again later.' });
+    }
     res.status(500).json({ error: error.message });
   }
 });
